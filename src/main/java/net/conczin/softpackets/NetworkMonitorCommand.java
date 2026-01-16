@@ -22,26 +22,26 @@ public class NetworkMonitorCommand extends AbstractCommand {
     @Nullable
     @Override
     protected CompletableFuture<Void> execute(@Nonnull CommandContext context) {
-        if (context.isPlayer()) {
-            QueuedPacketSenderSystem queue = Main.getInstance().getQueue();
-            long baseBytes = queue.metrics.getBaseBytes();
-            double totalDelay = queue.metrics.getTotalSeconds();
-            long packets = queue.metrics.getTotalPackets();
+        QueuedPacketSenderSystem queue = Main.getInstance().getQueue();
+        long baseBytes = queue.metrics.getBaseBytes();
+        double totalDelay = queue.metrics.getTotalSeconds();
+        long packets = queue.metrics.getTotalPackets();
 
-            context.sendMessage(Message.raw("Soft Packet Stats:"));
-            context.sendMessage(Message.raw(" Base: " + FormatUtil.bytesToString(baseBytes)));
-            context.sendMessage(Message.raw(" Average Delay: " + FormatUtil.simpleTimeUnitFormat((long) (totalDelay / Math.max(packets, 1) * 1000), TimeUnit.MILLISECONDS, 2)));
-            context.sendMessage(Message.raw(" Total Packets: " + packets));
+        context.sendMessage(Message.raw("Soft Packet Stats:"));
+        context.sendMessage(Message.raw(" Base: " + FormatUtil.bytesToString(baseBytes)));
+        context.sendMessage(Message.raw(" Average Delay: " + FormatUtil.simpleTimeUnitFormat((long) (totalDelay / Math.max(packets, 1) * 1000), TimeUnit.MILLISECONDS, 2)));
+        context.sendMessage(Message.raw(" Total Packets: " + packets));
+        context.sendMessage(Message.raw(" Throttles: Ping=" + queue.metrics.throttlePing + " Buffer=" + queue.metrics.throttleBuffer + " Max=" + queue.metrics.throttleMax));
 
-            queue.queue.forEach((handler, q) -> {
-                if (!q.isEmpty()) {
-                    PlayerAuthentication auth = handler.getAuth();
-                    if (auth == null) return;
-                    String identifier = auth.getUsername();
-                    context.sendMessage(Message.raw("   " + identifier + " has " + q.size() + " queued packets."));
-                }
-            });
-        }
+        queue.queue.forEach((handler, q) -> {
+            if (!q.isEmpty()) {
+                PlayerAuthentication auth = handler.getAuth();
+                if (auth == null) return;
+                String identifier = auth.getUsername();
+                context.sendMessage(Message.raw("   " + identifier + " has " + q.size() + " queued packets."));
+            }
+        });
+
         return CompletableFuture.completedFuture(null);
     }
 }

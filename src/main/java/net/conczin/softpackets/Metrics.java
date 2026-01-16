@@ -10,6 +10,10 @@ public class Metrics {
 
     long currentSecond = 0;
 
+    public long throttlePing = 0;
+    public long throttleBuffer = 0;
+    public long throttleMax = 0;
+
     public void tick() {
         long time = System.nanoTime();
         long second = time / 1_000_000_000;

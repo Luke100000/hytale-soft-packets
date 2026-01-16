@@ -43,7 +43,7 @@ public class SoftPacketConfig {
             .add()
             .build();
 
-    private long minBandwidth = 16 * 1024;
+    private long minBandwidth = 64 * 1024;
     private long maxBandwidth = 16 * 1024 * 1024;
     private long bufferReserveMargin = 16 * 1024;
     private boolean throttleWhenPingDegrades = true;

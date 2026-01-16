@@ -120,13 +120,22 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             while (!queue.isEmpty()) {
                 if (metrics.getUsedBytes() > config.getMinBandwidth()) {
                     // Maximum reached
-                    if (metrics.getBaseBytes() + metrics.getUsedBytes() > config.getMaxBandwidth()) break;
+                    if (metrics.getBaseBytes() + metrics.getUsedBytes() > config.getMaxBandwidth()) {
+                        metrics.throttleMax++;
+                        break;
+                    };
 
                     // Ping degraded
-                    if (pingDegraded && config.isThrottleWhenPingDegrades()) break;
+                    if (pingDegraded && config.isThrottleWhenPingDegrades()) {
+                        metrics.throttlePing++;
+                        break;
+                    }
 
                     // Channel buffer full
-                    if (handler.getChannel().bytesBeforeUnwritable() <= config.getBufferReserveMargin()) break;
+                    if (handler.getChannel().bytesBeforeUnwritable() <= config.getBufferReserveMargin()) {
+                        metrics.throttleBuffer++;
+                        break;
+                    }
                 }
 
                 // Send the packet
@@ -140,8 +149,6 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                 metrics.add(packet.size, packet.time);
             }
         }
-
-        queue.entrySet().removeIf(entry -> entry.getValue().isEmpty());
     }
 
     public static final FixedPacketArrayEncoder FILTER = new FixedPacketArrayEncoder();
