@@ -1,0 +1,21 @@
+{
+  "Group": "Conczin",
+  "Name": "Soft Packets",
+  "Version": "0.0.1",
+  "Description": "Fixed server degradation caused by bandwidth bottlenecked servers.",
+  "Authors": [
+    {
+      "Name": "Conczin",
+      "Email": "conczin@gmail.com",
+      "Url": "https://conczin.net/"
+    }
+  ],
+  "Website": "https://conczin.net/",
+  "Main": "net.conczin.softpackets.Main",
+  "ServerVersion": "*",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": true,
+  "SubPlugins": []
+}
