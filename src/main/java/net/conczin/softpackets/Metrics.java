@@ -13,6 +13,8 @@ public class Metrics {
     public long throttlePing = 0;
     public long throttleBuffer = 0;
     public long throttleMax = 0;
+    public long drops = 0;
+    public long prioritized = 0;
 
     public void tick() {
         long time = System.nanoTime();

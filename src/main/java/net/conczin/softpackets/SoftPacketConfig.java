@@ -28,6 +28,13 @@ public class SoftPacketConfig {
             .documentation("Amount of extra buffer to keep in bytes.")
             .add()
             .append(
+                    new KeyedCodec<>("MinDistance", Codec.LONG),
+                    (config, s) -> config.minDistance = s,
+                    config -> config.minDistance
+            )
+            .documentation("Chunks closer than this distance (in blocks) will not be throttled to avoid falling through the world.")
+            .add()
+            .append(
                     new KeyedCodec<>("ThrottleWhenPingDegrades", Codec.BOOLEAN),
                     (config, s) -> config.throttleWhenPingDegrades = s,
                     config -> config.throttleWhenPingDegrades
@@ -46,6 +53,7 @@ public class SoftPacketConfig {
     private long minBandwidth = 64 * 1024;
     private long maxBandwidth = 16 * 1024 * 1024;
     private long bufferReserveMargin = 16 * 1024;
+    private long minDistance = 48;
     private boolean throttleWhenPingDegrades = true;
     private boolean throttleLocalConnections = false;
 
@@ -58,6 +66,10 @@ public class SoftPacketConfig {
 
     public long getBufferReserveMargin() {
         return bufferReserveMargin;
+    }
+
+    public long getMinDistance() {
+        return minDistance;
     }
 
     public boolean isThrottleWhenPingDegrades() {
