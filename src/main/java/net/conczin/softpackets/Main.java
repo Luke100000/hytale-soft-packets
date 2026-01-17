@@ -30,7 +30,7 @@ public class Main extends JavaPlugin {
 
     @Override
     protected void setup() {
-        queue = new QueuedPacketSenderSystem();
+        queue = new QueuedPacketSenderSystem(getConfig());
 
         PacketAdapters.registerOutbound(queue);
 

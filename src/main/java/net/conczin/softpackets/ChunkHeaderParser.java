@@ -34,7 +34,7 @@ public class ChunkHeaderParser {
         return new Vector3i(
                 buf.getIntLE(1),
                 0,
-                buf.getIntLE(9)
+                buf.getIntLE(5)
         );
     }
 
@@ -76,10 +76,9 @@ public class ChunkHeaderParser {
     }
 
     public static double distanceTo(Vector3i chunkPos, Vector3d point) {
-        return point.distanceTo(
-                chunkPos.x * 32 + 16,
-                chunkPos.y * 32 + 16,
-                chunkPos.z * 32 + 16
+        return Math.sqrt(
+                Math.pow(point.x - (chunkPos.x * 32 + 16), 2) +
+                Math.pow(point.z - (chunkPos.z * 32 + 16), 2)
         );
     }
 }

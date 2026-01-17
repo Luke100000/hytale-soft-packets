@@ -21,11 +21,11 @@ public class SoftPacketConfig {
             .documentation("Maximum bandwidth in bytes per second.")
             .add()
             .append(
-                    new KeyedCodec<>("BufferReserveMargin", Codec.LONG),
-                    (config, s) -> config.bufferReserveMargin = s,
-                    config -> config.bufferReserveMargin
+                    new KeyedCodec<>("BufferReserveFraction", Codec.DOUBLE),
+                    (config, s) -> config.bufferReserveFraction = s,
+                    config -> config.bufferReserveFraction
             )
-            .documentation("Amount of extra buffer to keep in bytes.")
+            .documentation("Fraction of the output buffer to reserve until throttling occurs.")
             .add()
             .append(
                     new KeyedCodec<>("MinDistance", Codec.LONG),
@@ -50,22 +50,23 @@ public class SoftPacketConfig {
             .add()
             .build();
 
-    private long minBandwidth = 64 * 1024;
+    private long minBandwidth = 128 * 1024;
     private long maxBandwidth = 16 * 1024 * 1024;
-    private long bufferReserveMargin = 16 * 1024;
-    private long minDistance = 48;
+    private double bufferReserveFraction = 0.5;
+    private long minDistance = 64;
     private boolean throttleWhenPingDegrades = true;
     private boolean throttleLocalConnections = false;
 
     public long getMinBandwidth() {
         return minBandwidth;
     }
+
     public long getMaxBandwidth() {
         return maxBandwidth;
     }
 
-    public long getBufferReserveMargin() {
-        return bufferReserveMargin;
+    public double getBufferReserveFraction() {
+        return bufferReserveFraction;
     }
 
     public long getMinDistance() {

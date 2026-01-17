@@ -17,7 +17,9 @@ import com.hypixel.hytale.server.core.io.PacketHandler;
 import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
 import com.hypixel.hytale.server.core.io.handlers.game.GamePacketHandler;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.WriteBufferWaterMark;
 
 import javax.annotation.Nonnull;
 import java.util.*;
@@ -26,7 +28,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implements RunWhenPausedSystem<ChunkStore>, PacketFilter {
     public final Map<PacketHandler, PlayerQueue> queue = Collections.synchronizedMap(new WeakHashMap<>());
 
-    public final Metrics metrics = new Metrics();
+    public final Metrics metrics;
 
     private Packet currentPacket = null;
 
@@ -38,7 +40,9 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             SetChunkEnvironments.PACKET_ID,
             SetFluids.PACKET_ID,
             // World Map
-            UpdateWorldMap.PACKET_ID,
+            // TODO: The world map contains multiple chunks
+            //  the client may request "Missing" chunks and spam the queue
+            // UpdateWorldMap.PACKET_ID,
             // Delayed to prevent unexpected behavior
             JoinWorld.PACKET_ID,
             // Assets
@@ -94,6 +98,10 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             WorldLoadFinished.PACKET_ID
     );
 
+    public QueuedPacketSenderSystem(SoftPacketConfig config) {
+        this.metrics = new Metrics(config);
+    }
+
     @Override
     public void tick(float dt, int idx, @Nonnull Store<ChunkStore> store) {
         metrics.tick();
@@ -121,12 +129,12 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             boolean pingDegraded = ratio > 2.0;
 
             // Verify the status of the queue
-            queue.verify();
+            queue.verify(handler);
 
             while (!queue.isEmpty()) {
-                if (metrics.getUsedBytes() > config.getMinBandwidth()) {
+                if (metrics.getMinimumBucket() <= 0) {
                     // Maximum reached
-                    if (metrics.getBaseBytes() + metrics.getUsedBytes() > config.getMaxBandwidth()) {
+                    if (metrics.getMaximumBucket() - metrics.getBaseBytes() <= 0) {
                         metrics.throttleMax++;
                         break;
                     }
@@ -138,7 +146,10 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     }
 
                     // Channel buffer full
-                    if (handler.getChannel().bytesBeforeUnwritable() <= config.getBufferReserveMargin()) {
+                    Channel channel = handler.getChannel();
+                    WriteBufferWaterMark mark = channel.config().getWriteBufferWaterMark();
+                    double freeRatio = mark.high() <= 0 ? 1.0 : (double) channel.bytesBeforeUnwritable() / mark.high();
+                    if (freeRatio <= config.getBufferReserveFraction()) {
                         metrics.throttleBuffer++;
                         break;
                     }
@@ -151,8 +162,12 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                 handler.write(packet.packet);
                 currentPacket = null;
 
-                // Record usage
-                metrics.add(packet.size, packet.time);
+                // Record usage if the handler is active
+                // (dead channels usually don't consume real bandwidth)
+                // (but the channel may also still be used despite being inactive, e.g., during login)
+                if (handler.stillActive()) {
+                    metrics.add(packet.size, packet.time);
+                }
             }
         }
     }
@@ -170,6 +185,12 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         if (packet != currentPacket) {
             int packetSize = packet.computeSize();
 
+            // This is an unload-chunk-packet, clear chunk updates not even sent yet from the queue
+            Vector3i unloadChunkPos = ChunkHeaderParser.fromUnloadPacket(packet);
+            if (unloadChunkPos != null) {
+                queue.get(handler).remove(unloadChunkPos);
+            }
+
             // Throttle large packets
             if (largePacketIds.contains(packet.getId()) && (!handler.isLocalConnection() || Main.getInstance().getConfig().isThrottleLocalConnections())) {
                 if (tooCLose(handler, packet)) {
@@ -181,6 +202,11 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     queue.get(handler).add(packet, packetSize);
                     return true;
                 }
+            }
+
+            if (packet.getId() == UpdateWorldMap.PACKET_ID) {
+                System.out.println("Queued UpdateWorldMap packet " + packetSize + " bytes");
+                return false;
             }
 
             // Record the rest as base usage
@@ -219,9 +245,9 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         }
     }
 
-    public record CachedPacket(Packet packet, int size, long time) {
+    public record CachedPacket(Packet packet, int size, long time, Vector3i chunkPos) {
         public CachedPacket(Packet packet, int size) {
-            this(packet, size, System.nanoTime());
+            this(packet, size, System.nanoTime(), ChunkHeaderParser.fromPacket(packet));
         }
     }
 
@@ -229,11 +255,9 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         public final ConcurrentLinkedDeque<CachedPacket> queue = new ConcurrentLinkedDeque<>();
         public Vector3d lastPosition;
         public long queueSize = 0;
-        public PacketHandler handler;
 
         public PlayerQueue(PacketHandler handler) {
-            this.lastPosition = getPlayerPosition(handler);
-            this.handler = handler;
+            this.lastPosition = getPlayerPosition(handler).clone();
         }
 
         public void add(Packet packet, int packetSize) {
@@ -253,42 +277,36 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             return packet;
         }
 
-        public void verify() {
+        public void verify(PacketHandler handler) {
+            // Only recheck if the player has moved significantly
             Vector3d playerPosition = getPlayerPosition(handler);
             SoftPacketConfig config = Main.getInstance().getConfig();
-            if (playerPosition == null || playerPosition.distanceTo(lastPosition) < config.getMinDistance() / 2.0) {
+            if (playerPosition == null || playerPosition.distanceTo(lastPosition) < 32) {
                 return;
             }
-            lastPosition = playerPosition;
+            lastPosition.assign(playerPosition);
 
-            Set<Long> removedChunks = new HashSet<>();
+            // Send chunks too close immediately
             Iterator<CachedPacket> it = queue.descendingIterator();
             while (it.hasNext()) {
-                CachedPacket cachedPacket = it.next();
-                Packet packet = cachedPacket.packet();
-                Vector3i chunkPos = ChunkHeaderParser.fromPacket(packet);
-
-                // Chunk already unloaded, drop the packet
-                if (chunkPos != null && removedChunks.contains(chunkPos.x + (((long) chunkPos.z) << 32))) {
-                    queueSize -= cachedPacket.size;
-                    it.remove();
-                    metrics.drops++;
-                    continue;
-                }
-
-                // Send chunks too close immediately
-                if (chunkPos != null && ChunkHeaderParser.distanceTo(chunkPos, playerPosition) < config.getMinDistance()) {
-                    handler.write(cachedPacket.packet);
-                    queueSize -= cachedPacket.size;
+                CachedPacket p = it.next();
+                if (p.chunkPos != null && ChunkHeaderParser.distanceTo(p.chunkPos, playerPosition) < config.getMinDistance()) {
+                    handler.write(p.packet);
+                    queueSize -= p.size;
                     metrics.prioritized++;
                     it.remove();
                 }
+            }
+        }
 
-                // Remember unloaded chunks
-                Vector3i unloadChunkPos = ChunkHeaderParser.fromUnloadPacket(packet);
-                if (unloadChunkPos != null) {
-                    long chunkKey = unloadChunkPos.x + (((long) unloadChunkPos.z) << 32);
-                    removedChunks.add(chunkKey);
+        public void remove(Vector3i unloadChunkPos) {
+            Iterator<CachedPacket> it = queue.descendingIterator();
+            while (it.hasNext()) {
+                CachedPacket p = it.next();
+                if (p.chunkPos != null && p.chunkPos.x == unloadChunkPos.x && p.chunkPos.z == unloadChunkPos.z) {
+                    queueSize -= p.size;
+                    it.remove();
+                    metrics.drops++;
                 }
             }
         }
