@@ -41,7 +41,7 @@ public class NetworkMonitorCommand extends AbstractCommand {
                 if (auth == null) return;
                 String identifier = auth.getUsername();
                 String s = FormatUtil.bytesToString(q.queueSize);
-                context.sendMessage(Message.raw(String.format("    %s: %s packets, %s", identifier, q.getSize(), s)));
+                context.sendMessage(Message.raw(String.format("    %s: %s packets, %s, %s map chunks", identifier, q.getSize(), s, q.getLazyMap().getQueueSize())));
             }
         });
 

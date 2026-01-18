@@ -41,9 +41,6 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             SetChunkTintmap.PACKET_ID,
             SetChunkEnvironments.PACKET_ID,
             SetFluids.PACKET_ID
-            // World Map
-            // TODO: The world map contains multiple chunks
-            // UpdateWorldMap.PACKET_ID,
     );
 
     private static final Set<Integer> assetPacketIds = Set.of(
@@ -175,7 +172,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                 CachedPacket packet = queue.poll();
                 if (packet == null) break;
                 currentPacket = packet.packet();
-                handler.write(packet.packet);
+                handler.write(currentPacket);
                 currentPacket = null;
 
                 // Record usage if the handler is active
@@ -199,13 +196,15 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
         // If this is a new packet
         if (packet != currentPacket) {
+            PlayerQueue playerQueue = queues.get(handler);
+
             // Default is JSON-based assets with ~80% compression
             int packetSize = (int) (packet.computeSize() * compressionRatios.getOrDefault(packet.getId(), 0.25));
 
             // This is an unload-chunk-packet, clear chunk updates not even sent yet from the queue
             Vector3i unloadChunkPos = ChunkHeaderParser.fromUnloadPacket(packet);
             if (unloadChunkPos != null) {
-                queues.get(handler).remove(unloadChunkPos);
+                playerQueue.remove(unloadChunkPos);
             }
 
             // Throttle large packets
@@ -218,15 +217,17 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     return false;
                 } else {
                     // Queue the packet
-                    queues.get(handler).add(packet, packetSize);
+                    playerQueue.add(packet, packetSize);
                     return true;
                 }
             }
 
-            // TODO: Maintain a special queue for the world map.
-            //  Send markers and deloads immediately, queue chunk data.
-            if (packet.getId() == UpdateWorldMap.PACKET_ID) {
-                // System.out.println("Queued UpdateWorldMap packet " + packetSize + " bytes");
+            // Intercept and rebatch world map updates
+            if (packet instanceof UpdateWorldMap updateWorldMap) {
+                UpdateWorldMap filter = playerQueue.getLazyMap().filter(updateWorldMap);
+                currentPacket = filter;
+                handler.write(filter);
+                currentPacket = null;
                 return true;
             }
 
@@ -276,6 +277,8 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         private final Queue<CachedPacket> assetQueue = new LinkedList<>();
         private Queue<CachedPacket> chunkQueue;
 
+        private final LazyWorldMap lazyMap = new LazyWorldMap();
+
         public Vector3d lastPosition;
         public long queueSize = 0;
 
@@ -295,7 +298,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         }
 
         public boolean isEmpty() {
-            return assetQueue.isEmpty() && chunkQueue.isEmpty();
+            return assetQueue.isEmpty() && chunkQueue.isEmpty() && lazyMap.getQueueSize() == 0;
         }
 
         public int getSize() {
@@ -307,10 +310,18 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             if (packet == null) {
                 packet = chunkQueue.poll();
             }
+            if (packet == null) {
+                UpdateWorldMap nextPacket = lazyMap.getNextPacket();
+                if (nextPacket != null) {
+                    packet = new CachedPacket(
+                            nextPacket,
+                            (int) (nextPacket.computeSize() * compressionRatios.getOrDefault(nextPacket.getId(), 0.25))
+                    );
+                }
+            }
             if (packet != null) {
                 queueSize -= packet.size;
             }
-            // TODO: If still null, process map
             return packet;
         }
 
@@ -340,6 +351,10 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
         private static PriorityQueue<CachedPacket> getSortedQueue(Vector3d playerPosition, int initialCapacity) {
             return new PriorityQueue<>(initialCapacity, Comparator.comparingDouble(p -> ChunkHeaderParser.distanceTo3dSquared(p.chunkPos, playerPosition)));
+        }
+
+        public LazyWorldMap getLazyMap() {
+            return lazyMap;
         }
 
         public synchronized void remove(Vector3i unloadChunkPos) {
