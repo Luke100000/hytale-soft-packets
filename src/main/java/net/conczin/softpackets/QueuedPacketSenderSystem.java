@@ -161,7 +161,6 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     Channel channel = handler.getChannel();
                     WriteBufferWaterMark mark = channel.config().getWriteBufferWaterMark();
                     double freeRatio = mark.high() <= 0 ? 1.0 : (double) channel.bytesBeforeUnwritable() / mark.high();
-                    // System.out.println("Free buffer ratio: " + freeRatio + " (" + channel.bytesBeforeUnwritable() + " / " + mark.high() + ")");
                     if (freeRatio <= config.getBufferReserveFraction()) {
                         metrics.throttleBuffer++;
                         break;
@@ -198,8 +197,13 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         if (packet != currentPacket) {
             PlayerQueue playerQueue = queues.get(handler);
 
+            // Don't throttle local connections if disabled
+            if (handler.isLocalConnection() && !config.isThrottleLocalConnections()) {
+                return false;
+            }
+
             // Default is JSON-based assets with ~80% compression
-            int packetSize = (int) (packet.computeSize() * compressionRatios.getOrDefault(packet.getId(), 0.25));
+            int packetSize = getSize(packet);
 
             // This is an unload-chunk-packet, clear chunk updates not even sent yet from the queue
             Vector3i unloadChunkPos = ChunkHeaderParser.fromUnloadPacket(packet);
@@ -208,9 +212,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             }
 
             // Throttle large packets
-            if ((largePacketIds.contains(packet.getId()) || config.isThrottleAssetDownloading() && assetPacketIds.contains(packet.getId()))
-                && (!handler.isLocalConnection() || config.isThrottleLocalConnections())
-            ) {
+            if (largePacketIds.contains(packet.getId()) || config.isThrottleAssetDownloading() && assetPacketIds.contains(packet.getId())) {
                 if (tooCLose(handler, packet)) {
                     // Send it immediately
                     metrics.prioritized++;
@@ -273,6 +275,10 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         }
     }
 
+    private static int getSize(Packet packet) {
+        return (int) (packet.computeSize() * compressionRatios.getOrDefault(packet.getId(), 0.25));
+    }
+
     public class PlayerQueue {
         private final Queue<CachedPacket> assetQueue = new LinkedList<>();
         private Queue<CachedPacket> chunkQueue;
@@ -284,7 +290,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
         public PlayerQueue(PacketHandler handler) {
             this.lastPosition = getPlayerPosition(handler).clone();
-            this.chunkQueue = getSortedQueue(lastPosition, 1024);
+            this.chunkQueue = getSortedQueue(lastPosition, 32);
         }
 
         public void add(Packet packet, int packetSize) {
@@ -310,17 +316,14 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             if (packet == null) {
                 packet = chunkQueue.poll();
             }
+            if (packet != null) {
+                queueSize -= packet.size;
+            }
             if (packet == null) {
                 UpdateWorldMap nextPacket = lazyMap.getNextPacket();
                 if (nextPacket != null) {
-                    packet = new CachedPacket(
-                            nextPacket,
-                            (int) (nextPacket.computeSize() * compressionRatios.getOrDefault(nextPacket.getId(), 0.25))
-                    );
+                    packet = new CachedPacket(nextPacket, QueuedPacketSenderSystem.getSize(nextPacket));
                 }
-            }
-            if (packet != null) {
-                queueSize -= packet.size;
             }
             return packet;
         }
@@ -350,7 +353,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         }
 
         private static PriorityQueue<CachedPacket> getSortedQueue(Vector3d playerPosition, int initialCapacity) {
-            return new PriorityQueue<>(initialCapacity, Comparator.comparingDouble(p -> ChunkHeaderParser.distanceTo3dSquared(p.chunkPos, playerPosition)));
+            return new PriorityQueue<>(Math.max(32, initialCapacity), Comparator.comparingDouble(p -> ChunkHeaderParser.distanceTo3dSquared(p.chunkPos, playerPosition)));
         }
 
         public LazyWorldMap getLazyMap() {

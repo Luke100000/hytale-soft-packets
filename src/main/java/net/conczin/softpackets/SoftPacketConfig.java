@@ -58,7 +58,7 @@ public class SoftPacketConfig {
             .build();
 
     private long minBandwidth = 64 * 1024;
-    private long maxBandwidth = 8 * 1024 * 1024;
+    private long maxBandwidth = 16 * 1024 * 1024;
     private double bufferReserveFraction = 0.5;
 
     private long minDistance = 64;

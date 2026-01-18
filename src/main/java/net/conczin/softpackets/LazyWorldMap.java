@@ -17,7 +17,7 @@ public class LazyWorldMap {
         List<MapChunk> filtered = new ArrayList<>();
         if (packet.chunks != null) {
             for (MapChunk chunk : packet.chunks) {
-                long key = chunk.chunkX + chunk.chunkZ * 32L;
+                long key = (((long) chunk.chunkX) << 32) ^ (chunk.chunkZ & 0xffffffffL);
                 if (chunk.image == null) {
                     chunks.remove(key);
                     filtered.add(chunk);
