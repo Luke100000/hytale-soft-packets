@@ -9,7 +9,6 @@ import com.hypixel.hytale.protocol.Packet;
 import com.hypixel.hytale.protocol.Vector3i;
 import com.hypixel.hytale.protocol.packets.assets.*;
 import com.hypixel.hytale.protocol.packets.connection.PongType;
-import com.hypixel.hytale.protocol.packets.player.JoinWorld;
 import com.hypixel.hytale.protocol.packets.setup.*;
 import com.hypixel.hytale.protocol.packets.world.*;
 import com.hypixel.hytale.protocol.packets.worldmap.UpdateWorldMap;
@@ -23,12 +22,15 @@ import io.netty.channel.WriteBufferWaterMark;
 
 import javax.annotation.Nonnull;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implements RunWhenPausedSystem<ChunkStore>, PacketFilter {
-    public final Map<PacketHandler, PlayerQueue> queue = Collections.synchronizedMap(new WeakHashMap<>());
+    private static final double MIN_VERIFY_DISTANCE = 32;
+
+    public final Map<PacketHandler, PlayerQueue> queues = Collections.synchronizedMap(new WeakHashMap<>());
 
     public final Metrics metrics;
+    private final SoftPacketConfig config;
+    private final double minDistance;
 
     private Packet currentPacket = null;
 
@@ -38,17 +40,13 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             SetChunkHeightmap.PACKET_ID,
             SetChunkTintmap.PACKET_ID,
             SetChunkEnvironments.PACKET_ID,
-            SetFluids.PACKET_ID,
+            SetFluids.PACKET_ID
             // World Map
             // TODO: The world map contains multiple chunks
-            //  the client may request "Missing" chunks and spam the queue
             // UpdateWorldMap.PACKET_ID,
-            // Delayed to prevent unexpected behavior
-            JoinWorld.PACKET_ID,
-            // Assets
-            AssetInitialize.PACKET_ID,
-            AssetPart.PACKET_ID,
-            AssetFinalize.PACKET_ID,
+    );
+
+    private static final Set<Integer> assetPacketIds = Set.of(
             // Configs
             UpdateParticleSystems.PACKET_ID,
             UpdateItemCategories.PACKET_ID,
@@ -93,13 +91,32 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             UpdateRepulsionConfig.PACKET_ID,
             UpdateTrails.PACKET_ID,
             UpdateTranslations.PACKET_ID,
+
+            // Assets
+            AssetInitialize.PACKET_ID,
+            AssetPart.PACKET_ID,
+            AssetFinalize.PACKET_ID,
+
             // Progress indicators
             WorldLoadProgress.PACKET_ID,
             WorldLoadFinished.PACKET_ID
     );
 
+    private static final Map<Integer, Double> compressionRatios = Map.of(
+            SetChunk.PACKET_ID, 0.05,
+            SetChunkHeightmap.PACKET_ID, 0.5,
+            SetChunkTintmap.PACKET_ID, 0.75,
+            SetChunkEnvironments.PACKET_ID, 0.125,
+            SetFluids.PACKET_ID, 0.025,
+            UpdateWorldMap.PACKET_ID, 0.25,
+            AssetPart.PACKET_ID, 0.8
+
+    );
+
     public QueuedPacketSenderSystem(SoftPacketConfig config) {
         this.metrics = new Metrics(config);
+        this.config = Main.getInstance().getConfig();
+        this.minDistance = Math.pow(config.getMinDistance() + MIN_VERIFY_DISTANCE, 2.0);
     }
 
     @Override
@@ -108,12 +125,10 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
         // Random order to prevent starvation
         List<Map.Entry<PacketHandler, PlayerQueue>> entries;
-        synchronized (queue) {
-            entries = new ArrayList<>(queue.entrySet());
+        synchronized (queues) {
+            entries = new ArrayList<>(queues.entrySet());
         }
         Collections.shuffle(entries);
-
-        SoftPacketConfig config = Main.getInstance().getConfig();
 
         for (Map.Entry<PacketHandler, PlayerQueue> entry : entries) {
             PlayerQueue queue = entry.getValue();
@@ -149,6 +164,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     Channel channel = handler.getChannel();
                     WriteBufferWaterMark mark = channel.config().getWriteBufferWaterMark();
                     double freeRatio = mark.high() <= 0 ? 1.0 : (double) channel.bytesBeforeUnwritable() / mark.high();
+                    // System.out.println("Free buffer ratio: " + freeRatio + " (" + channel.bytesBeforeUnwritable() + " / " + mark.high() + ")");
                     if (freeRatio <= config.getBufferReserveFraction()) {
                         metrics.throttleBuffer++;
                         break;
@@ -176,37 +192,42 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
     @Override
     public boolean test(PacketHandler handler, Packet packet) {
-        if (!queue.containsKey(handler)) {
-            queue.put(handler, new PlayerQueue(handler));
+        if (!queues.containsKey(handler)) {
+            queues.put(handler, new PlayerQueue(handler));
             fixPipeline(handler);
         }
 
         // If this is a new packet
         if (packet != currentPacket) {
-            int packetSize = packet.computeSize();
+            // Default is JSON-based assets with ~80% compression
+            int packetSize = (int) (packet.computeSize() * compressionRatios.getOrDefault(packet.getId(), 0.25));
 
             // This is an unload-chunk-packet, clear chunk updates not even sent yet from the queue
             Vector3i unloadChunkPos = ChunkHeaderParser.fromUnloadPacket(packet);
             if (unloadChunkPos != null) {
-                queue.get(handler).remove(unloadChunkPos);
+                queues.get(handler).remove(unloadChunkPos);
             }
 
             // Throttle large packets
-            if (largePacketIds.contains(packet.getId()) && (!handler.isLocalConnection() || Main.getInstance().getConfig().isThrottleLocalConnections())) {
+            if ((largePacketIds.contains(packet.getId()) || config.isThrottleAssetDownloading() && assetPacketIds.contains(packet.getId()))
+                && (!handler.isLocalConnection() || config.isThrottleLocalConnections())
+            ) {
                 if (tooCLose(handler, packet)) {
                     // Send it immediately
                     metrics.prioritized++;
                     return false;
                 } else {
                     // Queue the packet
-                    queue.get(handler).add(packet, packetSize);
+                    queues.get(handler).add(packet, packetSize);
                     return true;
                 }
             }
 
+            // TODO: Maintain a special queue for the world map.
+            //  Send markers and deloads immediately, queue chunk data.
             if (packet.getId() == UpdateWorldMap.PACKET_ID) {
-                System.out.println("Queued UpdateWorldMap packet " + packetSize + " bytes");
-                return false;
+                // System.out.println("Queued UpdateWorldMap packet " + packetSize + " bytes");
+                return true;
             }
 
             // Record the rest as base usage
@@ -228,8 +249,8 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         if (position == Vector3d.ZERO) return false;
         Vector3i chunkPos = ChunkHeaderParser.fromPacket(packet);
         if (chunkPos == null) return false;
-        double distance = ChunkHeaderParser.distanceTo(chunkPos, position);
-        return distance < Main.getInstance().getConfig().getMinDistance();
+        double distance = ChunkHeaderParser.distanceTo3dSquared(chunkPos, position);
+        return distance < minDistance;
     }
 
     private static void fixPipeline(PacketHandler handler) {
@@ -252,58 +273,81 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
     }
 
     public class PlayerQueue {
-        public final ConcurrentLinkedDeque<CachedPacket> queue = new ConcurrentLinkedDeque<>();
+        private final Queue<CachedPacket> assetQueue = new LinkedList<>();
+        private Queue<CachedPacket> chunkQueue;
+
         public Vector3d lastPosition;
         public long queueSize = 0;
 
         public PlayerQueue(PacketHandler handler) {
             this.lastPosition = getPlayerPosition(handler).clone();
+            this.chunkQueue = getSortedQueue(lastPosition, 1024);
         }
 
         public void add(Packet packet, int packetSize) {
-            queue.add(new CachedPacket(packet, packetSize));
+            CachedPacket cachedPacket = new CachedPacket(packet, packetSize);
+            if (cachedPacket.chunkPos == null) {
+                assetQueue.add(cachedPacket);
+            } else {
+                chunkQueue.add(cachedPacket);
+            }
             queueSize += packetSize;
         }
 
         public boolean isEmpty() {
-            return queue.isEmpty();
+            return assetQueue.isEmpty() && chunkQueue.isEmpty();
         }
 
-        public CachedPacket poll() {
-            CachedPacket packet = queue.poll();
+        public int getSize() {
+            return assetQueue.size() + chunkQueue.size();
+        }
+
+        public synchronized CachedPacket poll() {
+            CachedPacket packet = assetQueue.poll();
+            if (packet == null) {
+                packet = chunkQueue.poll();
+            }
             if (packet != null) {
                 queueSize -= packet.size;
             }
+            // TODO: If still null, process map
             return packet;
         }
 
-        public void verify(PacketHandler handler) {
+        public synchronized void verify(PacketHandler handler) {
             // Only recheck if the player has moved significantly
             Vector3d playerPosition = getPlayerPosition(handler);
-            SoftPacketConfig config = Main.getInstance().getConfig();
-            if (playerPosition == null || playerPosition.distanceTo(lastPosition) < 32) {
+            if (playerPosition == null || playerPosition.distanceTo(lastPosition) < MIN_VERIFY_DISTANCE) {
                 return;
             }
             lastPosition.assign(playerPosition);
 
-            // Send chunks too close immediately
-            Iterator<CachedPacket> it = queue.descendingIterator();
-            while (it.hasNext()) {
-                CachedPacket p = it.next();
-                if (p.chunkPos != null && ChunkHeaderParser.distanceTo(p.chunkPos, playerPosition) < config.getMinDistance()) {
+            // Send chunks too close immediately and resort queue
+            long time = System.nanoTime();
+            Queue<CachedPacket> sortedQueue = getSortedQueue(playerPosition, chunkQueue.size());
+            for (CachedPacket p : chunkQueue) {
+                if (ChunkHeaderParser.distanceTo3dSquared(p.chunkPos, playerPosition) < minDistance) {
                     handler.write(p.packet);
                     queueSize -= p.size;
                     metrics.prioritized++;
-                    it.remove();
+                } else {
+                    sortedQueue.add(p);
                 }
             }
+            this.chunkQueue = sortedQueue;
+            metrics.timeSorted += System.nanoTime() - time;
         }
 
-        public void remove(Vector3i unloadChunkPos) {
-            Iterator<CachedPacket> it = queue.descendingIterator();
+        private static PriorityQueue<CachedPacket> getSortedQueue(Vector3d playerPosition, int initialCapacity) {
+            return new PriorityQueue<>(initialCapacity, Comparator.comparingDouble(p -> ChunkHeaderParser.distanceTo3dSquared(p.chunkPos, playerPosition)));
+        }
+
+        public synchronized void remove(Vector3i unloadChunkPos) {
+            // Drop unloaded chunks from the queue
+            Iterator<CachedPacket> it = chunkQueue.iterator();
             while (it.hasNext()) {
                 CachedPacket p = it.next();
-                if (p.chunkPos != null && p.chunkPos.x == unloadChunkPos.x && p.chunkPos.z == unloadChunkPos.z) {
+                if (p.chunkPos.x == unloadChunkPos.x && p.chunkPos.z == unloadChunkPos.z) {
                     queueSize -= p.size;
                     it.remove();
                     metrics.drops++;

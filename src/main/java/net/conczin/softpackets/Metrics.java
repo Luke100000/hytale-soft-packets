@@ -23,6 +23,8 @@ public class Metrics {
     public long drops = 0;
     public long prioritized = 0;
 
+    public long timeSorted = 0;
+
     public Metrics(SoftPacketConfig config) {
         this.config = config;
         this.minimumBucket = config.getMinBandwidth();
@@ -53,10 +55,10 @@ public class Metrics {
         long delay = time - timestampNanos;
 
         if (minimumBucket > 0) {
-            minimumBucket -= size;
+            minimumBucket -= Math.min(size, config.getMinBandwidth());
         }
         if (maximumBucket > 0) {
-            maximumBucket -= size;
+            maximumBucket -= Math.min(size, config.getMaxBandwidth());
         }
 
         totalPackets += 1;

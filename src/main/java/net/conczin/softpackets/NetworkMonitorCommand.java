@@ -31,17 +31,17 @@ public class NetworkMonitorCommand extends AbstractCommand {
         context.sendMessage(Message.raw(" Base bandwidth: " + FormatUtil.bytesToString(baseBytes)));
         context.sendMessage(Message.raw(" Average delay: " + FormatUtil.simpleTimeUnitFormat((long) (totalDelay / Math.max(packets, 1) * 1000), TimeUnit.MILLISECONDS, 2)));
         context.sendMessage(Message.raw(" Packets throttled: " + packets));
-        context.sendMessage(Message.raw(" Buckets: Min=" + FormatUtil.bytesToString(queue.metrics.getMinimumBucket()) + " Max=" + FormatUtil.bytesToString(queue.metrics.getMaximumBucket())));
         context.sendMessage(Message.raw(" Throttles: Ping=" + queue.metrics.throttlePing + " Buffer=" + queue.metrics.throttleBuffer + " Max=" + queue.metrics.throttleMax));
         context.sendMessage(Message.raw(" Prioritized " + queue.metrics.prioritized + " packets, dropped " + queue.metrics.drops));
+        context.sendMessage(Message.raw(" Spent " + FormatUtil.simpleTimeUnitFormat(queue.metrics.timeSorted, TimeUnit.NANOSECONDS, 4) + " sorting packets"));
 
-        queue.queue.forEach((handler, q) -> {
+        queue.queues.forEach((handler, q) -> {
             if (!q.isEmpty()) {
                 PlayerAuthentication auth = handler.getAuth();
                 if (auth == null) return;
                 String identifier = auth.getUsername();
                 String s = FormatUtil.bytesToString(q.queueSize);
-                context.sendMessage(Message.raw(String.format("    %s: %s packets, %s", identifier, q.queue.size(), s)));
+                context.sendMessage(Message.raw(String.format("    %s: %s packets, %s", identifier, q.getSize(), s)));
             }
         });
 

@@ -33,7 +33,7 @@ public class ChunkHeaderParser {
         ByteBuf buf = getCachedBytes(packet);
         return new Vector3i(
                 buf.getIntLE(1),
-                0,
+                -1,
                 buf.getIntLE(5)
         );
     }
@@ -65,7 +65,7 @@ public class ChunkHeaderParser {
                 ByteBuf buffer = getCachedBytes(cachedPacket);
                 return new Vector3i(
                         buffer.getIntLE(0),
-                        0,
+                        -1,
                         buffer.getIntLE(4)
                 );
             }
@@ -78,6 +78,14 @@ public class ChunkHeaderParser {
     public static double distanceTo(Vector3i chunkPos, Vector3d point) {
         return Math.sqrt(
                 Math.pow(point.x - (chunkPos.x * 32 + 16), 2) +
+                Math.pow(point.z - (chunkPos.z * 32 + 16), 2)
+        );
+    }
+
+    public static double distanceTo3dSquared(Vector3i chunkPos, Vector3d point) {
+        return (
+                Math.pow(point.x - (chunkPos.x * 32 + 16), 2) +
+                (chunkPos.y == -1 ? 0 : Math.pow(point.y - (chunkPos.y * 32 + 16), 2)) +
                 Math.pow(point.z - (chunkPos.z * 32 + 16), 2)
         );
     }
