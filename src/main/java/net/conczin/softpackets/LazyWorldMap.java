@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 public class LazyWorldMap {
-    private static final int CHUNK_SIZE = 8;
+    private static final int CHUNK_SIZE = 5;
 
     private final Map<Long, MapChunk> chunks = new HashMap<>();
 
