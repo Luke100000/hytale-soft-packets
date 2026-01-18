@@ -18,7 +18,6 @@ import com.hypixel.hytale.server.core.io.handlers.game.GamePacketHandler;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelPipeline;
-import io.netty.channel.WriteBufferWaterMark;
 
 import javax.annotation.Nonnull;
 import java.util.*;
@@ -100,13 +99,13 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
     );
 
     private static final Map<Integer, Double> compressionRatios = Map.of(
-            SetChunk.PACKET_ID, 0.05,
+            SetChunk.PACKET_ID, 0.065,
             SetChunkHeightmap.PACKET_ID, 0.5,
             SetChunkTintmap.PACKET_ID, 0.75,
-            SetChunkEnvironments.PACKET_ID, 0.125,
-            SetFluids.PACKET_ID, 0.025,
-            UpdateWorldMap.PACKET_ID, 0.25,
-            AssetPart.PACKET_ID, 0.8
+            SetChunkEnvironments.PACKET_ID, 0.15,
+            SetFluids.PACKET_ID, 0.05,
+            UpdateWorldMap.PACKET_ID, 0.3,
+            AssetPart.PACKET_ID, 0.85
 
     );
 
@@ -159,9 +158,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
                     // Channel buffer full
                     Channel channel = handler.getChannel();
-                    WriteBufferWaterMark mark = channel.config().getWriteBufferWaterMark();
-                    double freeRatio = mark.high() <= 0 ? 1.0 : (double) channel.bytesBeforeUnwritable() / mark.high();
-                    if (freeRatio <= config.getBufferReserveFraction()) {
+                    if (!channel.isWritable()) {
                         metrics.throttleBuffer++;
                         break;
                     }
@@ -293,7 +290,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             this.chunkQueue = getSortedQueue(lastPosition, 32);
         }
 
-        public void add(Packet packet, int packetSize) {
+        public synchronized void add(Packet packet, int packetSize) {
             CachedPacket cachedPacket = new CachedPacket(packet, packetSize);
             if (cachedPacket.chunkPos == null) {
                 assetQueue.add(cachedPacket);

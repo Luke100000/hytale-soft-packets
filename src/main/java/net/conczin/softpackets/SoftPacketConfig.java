@@ -21,13 +21,6 @@ public class SoftPacketConfig {
             .documentation("Maximum bandwidth in bytes per second.")
             .add()
             .append(
-                    new KeyedCodec<>("BufferReserveFraction", Codec.DOUBLE),
-                    (config, s) -> config.bufferReserveFraction = s,
-                    config -> config.bufferReserveFraction
-            )
-            .documentation("Fraction of the output buffer to reserve until throttling occurs.")
-            .add()
-            .append(
                     new KeyedCodec<>("MinDistance", Codec.LONG),
                     (config, s) -> config.minDistance = s,
                     config -> config.minDistance
@@ -59,7 +52,6 @@ public class SoftPacketConfig {
 
     private long minBandwidth = 64 * 1024;
     private long maxBandwidth = 16 * 1024 * 1024;
-    private double bufferReserveFraction = 0.5;
 
     private long minDistance = 64;
 
@@ -73,10 +65,6 @@ public class SoftPacketConfig {
 
     public long getMaxBandwidth() {
         return maxBandwidth;
-    }
-
-    public double getBufferReserveFraction() {
-        return bufferReserveFraction;
     }
 
     public long getMinDistance() {
