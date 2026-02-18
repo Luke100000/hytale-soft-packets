@@ -75,13 +75,6 @@ public class ChunkHeaderParser {
         return null;
     }
 
-    public static double distanceTo(Vector3i chunkPos, Vector3d point) {
-        return Math.sqrt(
-                Math.pow(point.x - (chunkPos.x * 32 + 16), 2) +
-                Math.pow(point.z - (chunkPos.z * 32 + 16), 2)
-        );
-    }
-
     public static double distanceTo3dSquared(Vector3i chunkPos, Vector3d point) {
         return (
                 Math.pow(point.x - (chunkPos.x * 32 + 16), 2) +

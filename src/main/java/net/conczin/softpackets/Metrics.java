@@ -1,7 +1,5 @@
 package net.conczin.softpackets;
 
-import com.hypixel.hytale.common.util.FormatUtil;
-
 public class Metrics {
     SoftPacketConfig config;
 

@@ -6,6 +6,7 @@ import com.hypixel.hytale.component.system.tick.TickingSystem;
 import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.metrics.metric.HistoricMetric;
 import com.hypixel.hytale.protocol.Packet;
+import com.hypixel.hytale.protocol.ToClientPacket;
 import com.hypixel.hytale.protocol.Vector3i;
 import com.hypixel.hytale.protocol.packets.assets.*;
 import com.hypixel.hytale.protocol.packets.connection.PongType;
@@ -31,7 +32,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
     private final SoftPacketConfig config;
     private final double minDistance;
 
-    private Packet currentPacket = null;
+    private ToClientPacket currentPacket = null;
 
     private static final Set<Integer> largePacketIds = Set.of(
             // Chunk
@@ -185,13 +186,13 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
     @Override
     public boolean test(PacketHandler handler, Packet packet) {
-        if (!queues.containsKey(handler)) {
-            queues.put(handler, new PlayerQueue(handler));
-            fixPipeline(handler);
-        }
-
         // If this is a new packet
-        if (packet != currentPacket) {
+        if (packet != currentPacket && packet instanceof ToClientPacket toClientPacket) {
+            if (!queues.containsKey(handler)) {
+                queues.put(handler, new PlayerQueue(handler));
+                fixPipeline(handler);
+            }
+
             PlayerQueue playerQueue = queues.get(handler);
 
             // Don't throttle local connections if disabled
@@ -216,7 +217,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     return false;
                 } else {
                     // Queue the packet
-                    playerQueue.add(packet, packetSize);
+                    playerQueue.add(toClientPacket, packetSize);
                     return true;
                 }
             }
@@ -261,13 +262,13 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     "fixedPacketArrayEncoder",
                     FILTER
             );
-        } catch (Exception ignored) {
-            Main.LOGGER.atSevere().log("Failed to replace packet array encoder in pipeline for handler " + handler);
+        } catch (Exception exception) {
+            Main.LOGGER.atWarning().log("Failed to replace packet array encoder in pipeline for handler " + handler + " - " + exception);
         }
     }
 
-    public record CachedPacket(Packet packet, int size, long time, Vector3i chunkPos) {
-        public CachedPacket(Packet packet, int size) {
+    public record CachedPacket(ToClientPacket packet, int size, long time, Vector3i chunkPos) {
+        public CachedPacket(ToClientPacket packet, int size) {
             this(packet, size, System.nanoTime(), ChunkHeaderParser.fromPacket(packet));
         }
     }
@@ -290,7 +291,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
             this.chunkQueue = getSortedQueue(lastPosition, 32);
         }
 
-        public synchronized void add(Packet packet, int packetSize) {
+        public synchronized void add(ToClientPacket packet, int packetSize) {
             CachedPacket cachedPacket = new CachedPacket(packet, packetSize);
             if (cachedPacket.chunkPos == null) {
                 assetQueue.add(cachedPacket);
