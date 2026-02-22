@@ -57,7 +57,7 @@ public class SoftPacketConfig {
 
     private boolean throttleWhenPingDegrades = true;
     private boolean throttleLocalConnections = false;
-    private boolean throttleAssetDownloading = true;
+    private boolean throttleAssetDownloading = false;
 
     public long getMinBandwidth() {
         return minBandwidth;
