@@ -1,3 +1,7 @@
+# 1.0.5
+
+* Fixed permission group error
+
 # 1.0.4
 
 * Updated to 0.5.3

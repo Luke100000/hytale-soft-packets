@@ -14,7 +14,6 @@ import java.util.concurrent.TimeUnit;
 public class NetworkMonitorCommand extends AbstractCommand {
     public NetworkMonitorCommand() {
         super("softpackets", "Displays soft packet stats.");
-        this.addAliases("sp");
     }
 
     @Nullable

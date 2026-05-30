@@ -1,6 +1,6 @@
 {
   "Group": "Conczin",
-  "Name": "Soft Packets",
+  "Name": "SoftPackets",
   "Version": "0.0.1",
   "Description": "Fixed server degradation caused by bandwidth bottlenecked servers.",
   "Authors": [
