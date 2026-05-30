@@ -1,11 +1,11 @@
 package net.conczin.softpackets;
 
-import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.protocol.CachedPacket;
 import com.hypixel.hytale.protocol.Packet;
 import com.hypixel.hytale.protocol.Vector3i;
 import com.hypixel.hytale.protocol.packets.world.*;
 import io.netty.buffer.ByteBuf;
+import org.joml.Vector3d;
 
 import java.lang.reflect.Field;
 

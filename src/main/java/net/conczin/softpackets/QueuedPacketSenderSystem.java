@@ -3,11 +3,11 @@ package net.conczin.softpackets;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.component.system.tick.RunWhenPausedSystem;
 import com.hypixel.hytale.component.system.tick.TickingSystem;
-import com.hypixel.hytale.math.vector.Vector3d;
 import com.hypixel.hytale.metrics.metric.HistoricMetric;
 import com.hypixel.hytale.protocol.Packet;
 import com.hypixel.hytale.protocol.ToClientPacket;
 import com.hypixel.hytale.protocol.Vector3i;
+import com.hypixel.hytale.protocol.io.ChannelConnection;
 import com.hypixel.hytale.protocol.packets.assets.*;
 import com.hypixel.hytale.protocol.packets.connection.PongType;
 import com.hypixel.hytale.protocol.packets.setup.*;
@@ -16,15 +16,18 @@ import com.hypixel.hytale.protocol.packets.worldmap.UpdateWorldMap;
 import com.hypixel.hytale.server.core.io.PacketHandler;
 import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
 import com.hypixel.hytale.server.core.io.handlers.game.GamePacketHandler;
+import com.hypixel.hytale.server.core.io.netty.NettyUtil;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelPipeline;
+import org.joml.Vector3d;
 
 import javax.annotation.Nonnull;
 import java.util.*;
 
+
 public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implements RunWhenPausedSystem<ChunkStore>, PacketFilter {
     private static final double MIN_VERIFY_DISTANCE = 32;
+    private static final Vector3d ZERO = new Vector3d(0, 0, 0);
 
     public final Map<PacketHandler, PlayerQueue> queues = Collections.synchronizedMap(new WeakHashMap<>());
 
@@ -158,7 +161,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
                     }
 
                     // Channel buffer full
-                    Channel channel = handler.getChannel();
+                    ChannelConnection channel = handler.getChannel();
                     if (!channel.isWritable()) {
                         metrics.throttleBuffer++;
                         break;
@@ -242,12 +245,12 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         if (handler instanceof GamePacketHandler gamePacketHandler) {
             return gamePacketHandler.getPlayerRef().getTransform().getPosition();
         }
-        return Vector3d.ZERO;
+        return ZERO;
     }
 
     private boolean tooCLose(PacketHandler handler, Packet packet) {
         Vector3d position = getPlayerPosition(handler);
-        if (position == Vector3d.ZERO) return false;
+        if (position == ZERO) return false;
         Vector3i chunkPos = ChunkHeaderParser.fromPacket(packet);
         if (chunkPos == null) return false;
         double distance = ChunkHeaderParser.distanceTo3dSquared(chunkPos, position);
@@ -256,12 +259,16 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
 
     private static void fixPipeline(PacketHandler handler) {
         try {
-            ChannelPipeline p = handler.getChannel().pipeline();
-            p.replace(
-                    "packetArrayEncoder",
-                    "fixedPacketArrayEncoder",
-                    FILTER
-            );
+            ChannelConnection connection = handler.getChannel();
+            if (connection instanceof NettyUtil.NettyChannelConnection(Channel channel)) {
+                channel.pipeline().replace(
+                        "packetArrayEncoder",
+                        "fixedPacketArrayEncoder",
+                        FILTER
+                );
+            } else {
+                Main.LOGGER.atWarning().log("ChannelConnection is not a NettyChannelConnection, cannot fix pipeline");
+            }
         } catch (Exception exception) {
             Main.LOGGER.atWarning().log("Failed to replace packet array encoder in pipeline for handler " + handler + " - " + exception);
         }
@@ -287,7 +294,7 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         public long queueSize = 0;
 
         public PlayerQueue(PacketHandler handler) {
-            this.lastPosition = getPlayerPosition(handler).clone();
+            this.lastPosition = new Vector3d(getPlayerPosition(handler));
             this.chunkQueue = getSortedQueue(lastPosition, 32);
         }
 
@@ -329,10 +336,10 @@ public class QueuedPacketSenderSystem extends TickingSystem<ChunkStore> implemen
         public synchronized void verify(PacketHandler handler) {
             // Only recheck if the player has moved significantly
             Vector3d playerPosition = getPlayerPosition(handler);
-            if (playerPosition == null || playerPosition.distanceTo(lastPosition) < MIN_VERIFY_DISTANCE) {
+            if (playerPosition == null || playerPosition.distance(lastPosition) < MIN_VERIFY_DISTANCE) {
                 return;
             }
-            lastPosition.assign(playerPosition);
+            lastPosition.set(playerPosition);
 
             // Send chunks too close immediately and resort queue
             long time = System.nanoTime();

@@ -1,3 +1,7 @@
+# 1.0.4
+
+* Updated to 0.5.3
+
 # 1.0.3
 
 * Disabled ThrottleAssetDownloading by default as it has a higher risk of mod conflicts

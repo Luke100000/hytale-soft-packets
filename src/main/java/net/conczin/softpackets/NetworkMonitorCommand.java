@@ -1,7 +1,6 @@
 package net.conczin.softpackets;
 
 import com.hypixel.hytale.common.util.FormatUtil;
-import com.hypixel.hytale.protocol.GameMode;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.auth.PlayerAuthentication;
 import com.hypixel.hytale.server.core.command.system.AbstractCommand;
@@ -16,7 +15,6 @@ public class NetworkMonitorCommand extends AbstractCommand {
     public NetworkMonitorCommand() {
         super("softpackets", "Displays soft packet stats.");
         this.addAliases("sp");
-        this.setPermissionGroup(GameMode.Creative);
     }
 
     @Nullable
